@@ -45,6 +45,11 @@ namespace ShvdnCompat.Tests
                 Assert.StartsWith(o.CacheDir, parts[1]);
             }
 
+            // The ASI's fast path reads this index: one line per API with the original's full SHA-256.
+            string[] index = File.ReadAllLines(o.CacheIndexFile).Where(l => l.Length > 0).ToArray();
+            Assert.Equal(2, index.Length);
+            Assert.All(index, l => Assert.Equal(64, l.Split('|')[1].Length));
+
             // The game folder itself is untouched.
             Assert.Equal(File.ReadAllBytes(TestPaths.NightlyApi(3)), File.ReadAllBytes(Path.Combine(game, "ScriptHookVDotNet3.dll")));
 

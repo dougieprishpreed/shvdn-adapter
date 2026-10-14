@@ -15,6 +15,16 @@ namespace ShvdnCompat
         Off,
     }
 
+    public enum EngineTask
+    {
+        /// <summary>Patch, then scan (used by tests and manual runs).</summary>
+        All,
+        /// <summary>Produce the patched API files and the redirect list.</summary>
+        Patch,
+        /// <summary>Check the scripts against the API files SHVDN will load.</summary>
+        Scan,
+    }
+
     /// <summary>Options passed from the native ASI as "key=value" lines.</summary>
     public sealed class Options
     {
@@ -26,6 +36,12 @@ namespace ShvdnCompat
         public bool ScanScripts { get; set; } = true;
         public string LogFile { get; set; }
         public string RedirectFile { get; set; }
+        public EngineTask Task { get; set; } = EngineTask.All;
+
+        /// <summary>Identifies the ASI build; stored in the cache index so the ASI can trust cached copies.</summary>
+        public string Fingerprint { get; set; } = string.Empty;
+
+        public string CacheIndexFile => Path.Combine(CacheDir, "index.txt");
 
         public string CacheDir => Path.Combine(DataDir, "cache");
 
@@ -49,6 +65,8 @@ namespace ShvdnCompat
                     case "scanscripts": o.ScanScripts = ParseBool(value, true); break;
                     case "logfile": o.LogFile = value; break;
                     case "redirectfile": o.RedirectFile = value; break;
+                    case "task": o.Task = Enum.TryParse(value, true, out EngineTask task) ? task : EngineTask.All; break;
+                    case "fingerprint": o.Fingerprint = value; break;
                 }
             }
             if (string.IsNullOrEmpty(o.GameDir)) throw new ArgumentException("GameDir is required");

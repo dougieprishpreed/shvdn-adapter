@@ -41,12 +41,28 @@ namespace ShvdnCompat
 
         public static int Run(Options options, Log log)
         {
+            switch (options.Task)
+            {
+                case EngineTask.Patch:
+                    return Patch(options, log);
+                case EngineTask.Scan:
+                    return Scan(options, log);
+                default:
+                    int result = Patch(options, log);
+                    Scan(options, log);
+                    return result;
+            }
+        }
+
+        /// <summary>Creates the patched API files and writes redirects.txt and the cache index for the ASI.</summary>
+        public static int Patch(Options options, Log log)
+        {
             log.Info($"ShvdnLegacyCompat patcher {Version} (build {BuildId}), mode={options.Mode}, game folder: {options.GameDir}");
             Directory.CreateDirectory(options.DataDir);
             Directory.CreateDirectory(options.CacheDir);
 
             var redirects = new List<string>();
-            var scanModules = new Dictionary<int, ModuleDefinition>();
+            var index = new List<string>();
             int result = 0;
 
             foreach (int major in new[] { 2, 3 })
@@ -60,8 +76,12 @@ namespace ShvdnCompat
                 string apiPath = Path.Combine(options.GameDir, $"ScriptHookVDotNet{major}.dll");
                 try
                 {
-                    string effective = ProcessApi(options, log, major, apiPath, redirects);
-                    if (effective != null && options.ScanScripts) scanModules[major] = ReadModule(File.ReadAllBytes(effective));
+                    var redirect = ProcessApi(options, log, major, apiPath);
+                    if (redirect != null)
+                    {
+                        redirects.Add(apiPath + "|" + redirect.Value.patched);
+                        index.Add($"{major}|{redirect.Value.sha256}|{redirect.Value.patched}|{options.Fingerprint}");
+                    }
                 }
                 catch (Exception e)
                 {
@@ -71,24 +91,46 @@ namespace ShvdnCompat
             }
 
             WriteAllTextAtomic(options.RedirectFile, string.Join("\n", redirects) + "\n");
-
-            if (options.ScanScripts)
-            {
-                try
-                {
-                    ScriptScanner.Scan(options.GameDir, scanModules, log);
-                }
-                catch (Exception e)
-                {
-                    log.Warn("Script scan failed: " + e);
-                }
-            }
-
+            WriteAllTextAtomic(options.CacheIndexFile, string.Join("\n", index) + "\n");
             return result;
         }
 
-        /// <summary>Returns the path of the API file SHVDN will effectively load, or null if none.</summary>
-        private static string ProcessApi(Options options, Log log, int major, string apiPath, List<string> redirects)
+        /// <summary>Checks the scripts against the API files SHVDN is going to load (patched where redirected).</summary>
+        public static int Scan(Options options, Log log)
+        {
+            if (!options.ScanScripts) return 0;
+
+            var redirected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(options.RedirectFile))
+            {
+                foreach (string line in File.ReadAllLines(options.RedirectFile))
+                {
+                    string[] parts = line.Split('|');
+                    if (parts.Length == 2) redirected[parts[0]] = parts[1];
+                }
+            }
+
+            try
+            {
+                var apis = new Dictionary<int, ModuleDefinition>();
+                foreach (int major in new[] { 2, 3 })
+                {
+                    string apiPath = Path.Combine(options.GameDir, $"ScriptHookVDotNet{major}.dll");
+                    string effective = redirected.TryGetValue(apiPath, out string patched) ? patched : apiPath;
+                    if (File.Exists(effective)) apis[major] = ReadModule(File.ReadAllBytes(effective));
+                }
+                ScriptScanner.Scan(options.GameDir, apis, log);
+                return 0;
+            }
+            catch (Exception e)
+            {
+                log.Warn("Script scan failed: " + e);
+                return 1;
+            }
+        }
+
+        /// <summary>Returns the redirect (patched copy + hash of the original) SHVDN should get, or null for none.</summary>
+        private static (string patched, string sha256)? ProcessApi(Options options, Log log, int major, string apiPath)
         {
             string fileName = Path.GetFileName(apiPath);
             string backupPath = apiPath + BackupSuffix;
@@ -106,7 +148,7 @@ namespace ShvdnCompat
             {
                 case PatchMode.Off:
                     log.Info($"{fileName}: Mode=Off, left as is.");
-                    return apiPath;
+                    return null;
 
                 case PatchMode.Restore:
                     if (alreadyPatched && File.Exists(backupPath))
@@ -118,37 +160,36 @@ namespace ShvdnCompat
                     {
                         log.Info($"{fileName}: nothing to restore.");
                     }
-                    return apiPath;
+                    return null;
 
                 case PatchMode.Disk:
                     if (alreadyPatched)
                     {
                         log.Info($"{fileName}: already patched on disk.");
-                        return apiPath;
+                        return null;
                     }
-                    string cached = GetOrCreatePatched(options, log, major, fileName, original);
+                    string cached = GetOrCreatePatched(options, log, major, fileName, original, out _);
                     File.Copy(apiPath, backupPath, true);
                     File.Copy(cached, apiPath, true);
                     log.Info($"{fileName}: patched in place (original saved as {Path.GetFileName(backupPath)}).");
-                    return apiPath;
+                    return null;
 
                 default:
                     if (alreadyPatched)
                     {
                         log.Info($"{fileName}: the file on disk is already patched (left over from Mode=Disk), no redirect needed.");
-                        return apiPath;
+                        return null;
                     }
-                    string patched = GetOrCreatePatched(options, log, major, fileName, original);
-                    redirects.Add(apiPath + "|" + patched);
+                    string patched = GetOrCreatePatched(options, log, major, fileName, original, out string sha256);
                     log.Info($"{fileName}: SHVDN will be redirected to {patched}");
-                    return patched;
+                    return (patched, sha256);
             }
         }
 
-        private static string GetOrCreatePatched(Options options, Log log, int major, string fileName, byte[] original)
+        private static string GetOrCreatePatched(Options options, Log log, int major, string fileName, byte[] original, out string sha256)
         {
-            string hash;
-            using (SHA256 sha = SHA256.Create()) hash = Hex(sha.ComputeHash(original)).Substring(0, 16);
+            using (SHA256 sha = SHA256.Create()) sha256 = Hex(sha.ComputeHash(original));
+            string hash = sha256.Substring(0, 16);
 
             string stem = Path.GetFileNameWithoutExtension(fileName);
             string cachePath = Path.Combine(options.CacheDir, $"{stem}.{hash}.{BuildId}.dll");

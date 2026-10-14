@@ -11,6 +11,9 @@
     <DebugType>none</DebugType>
     <Deterministic>true</Deterministic>
     <Version>1.0.0</Version>
+    <!-- The ASI runs the net48 build as its own process; the net8.0 build is a library for the tests. -->
+    <OutputType Condition="'$(TargetFramework)' == 'net48'">Exe</OutputType>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
   </PropertyGroup>
 
   <ItemGroup>

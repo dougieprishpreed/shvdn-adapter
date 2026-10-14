@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>BindingChecker</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>
