@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>ShvdnCompat.Shims.V2</AssemblyName>
+    <RootNamespace>ShvdnCompat.Shims.V2</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\ShimAttributes.cs" Link="ShimAttributes.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only: the shims are written against the current nightly API surface. -->
+    <Reference Include="ScriptHookVDotNet2">
+      <HintPath>..\..\..\ref\nightly\ScriptHookVDotNet2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
