@@ -35,11 +35,15 @@ namespace compat::redirect
         using NtCreateFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
             PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
         using NtOpenFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, ULONG, ULONG);
+        using NtQueryAttributesFileFn = NTSTATUS(NTAPI*)(POBJECT_ATTRIBUTES, PVOID);
         using RtlEqualUnicodeStringFn = BOOLEAN(NTAPI*)(const UNICODE_STRING*, const UNICODE_STRING*, BOOLEAN);
         using CreateFileWFn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 
         NtCreateFileFn g_origNtCreateFile = nullptr;
         NtOpenFileFn g_origNtOpenFile = nullptr;
+        NtQueryAttributesFileFn g_origNtQueryAttributesFile = nullptr;
+        NtQueryAttributesFileFn g_origNtQueryFullAttributesFile = nullptr;
+        volatile LONG g_traceBudget = 64;
         RtlEqualUnicodeStringFn g_rtlEqualUnicodeString = nullptr;
         CreateFileWFn g_origCreateFileW = nullptr;
 
@@ -125,6 +129,44 @@ namespace compat::redirect
             return t;
         }
 
+        // Logs the first operations on the API paths, so an in-game failure shows exactly what the CLR did.
+        void Trace(const wchar_t* op, const Target* t, ACCESS_MASK access, ULONG disposition, ULONG options, NTSTATUS status)
+        {
+            if (InterlockedDecrement(&g_traceBudget) < 0)
+            {
+                return;
+            }
+            log::Info(L"[trace] %ls %ls access=0x%08lX disposition=%lu options=0x%08lX -> NTSTATUS 0x%08lX%ls",
+                op, t->original, static_cast<unsigned long>(access), disposition, options, static_cast<unsigned long>(status),
+                t->active ? L" (redirected)" : L"");
+        }
+
+        NTSTATUS NTAPI HookNtQueryAttributesFile(POBJECT_ATTRIBUTES attributes, PVOID info)
+        {
+            if (Target* t = MatchForRead(attributes, 0))
+            {
+                OBJECT_ATTRIBUTES redirected = *attributes;
+                redirected.ObjectName = &t->patchedNtUs;
+                NTSTATUS st = g_origNtQueryAttributesFile(&redirected, info);
+                Trace(L"NtQueryAttributesFile", t, 0, 0, 0, st);
+                return st;
+            }
+            return g_origNtQueryAttributesFile(attributes, info);
+        }
+
+        NTSTATUS NTAPI HookNtQueryFullAttributesFile(POBJECT_ATTRIBUTES attributes, PVOID info)
+        {
+            if (Target* t = MatchForRead(attributes, 0))
+            {
+                OBJECT_ATTRIBUTES redirected = *attributes;
+                redirected.ObjectName = &t->patchedNtUs;
+                NTSTATUS st = g_origNtQueryFullAttributesFile(&redirected, info);
+                Trace(L"NtQueryFullAttributesFile", t, 0, 0, 0, st);
+                return st;
+            }
+            return g_origNtQueryFullAttributesFile(attributes, info);
+        }
+
         NTSTATUS NTAPI HookNtCreateFile(PHANDLE handle, ACCESS_MASK access, POBJECT_ATTRIBUTES attributes,
             PIO_STATUS_BLOCK iosb, PLARGE_INTEGER allocationSize, ULONG fileAttributes, ULONG shareAccess,
             ULONG disposition, ULONG options, PVOID eaBuffer, ULONG eaLength)
@@ -135,8 +177,10 @@ namespace compat::redirect
                 {
                     OBJECT_ATTRIBUTES redirected = *attributes;
                     redirected.ObjectName = &t->patchedNtUs;
-                    return g_origNtCreateFile(handle, access, &redirected, iosb, allocationSize, fileAttributes,
+                    NTSTATUS st = g_origNtCreateFile(handle, access, &redirected, iosb, allocationSize, fileAttributes,
                         shareAccess, disposition, options, eaBuffer, eaLength);
+                    Trace(L"NtCreateFile", t, access, disposition, options, st);
+                    return st;
                 }
             }
             return g_origNtCreateFile(handle, access, attributes, iosb, allocationSize, fileAttributes, shareAccess,
@@ -150,7 +194,9 @@ namespace compat::redirect
             {
                 OBJECT_ATTRIBUTES redirected = *attributes;
                 redirected.ObjectName = &t->patchedNtUs;
-                return g_origNtOpenFile(handle, access, &redirected, iosb, shareAccess, options);
+                NTSTATUS st = g_origNtOpenFile(handle, access, &redirected, iosb, shareAccess, options);
+                Trace(L"NtOpenFile", t, access, kFileOpen, options, st);
+                return st;
             }
             return g_origNtOpenFile(handle, access, attributes, iosb, shareAccess, options);
         }
@@ -349,6 +395,16 @@ namespace compat::redirect
         if (createHooked && !openHooked)
         {
             log::Warn(L"NtOpenFile could not be hooked; only NtCreateFile is redirected.");
+        }
+        // Path-based attribute queries must describe the same file the opens return, or the CLR sees a file
+        // whose size/timestamps change between its checks and its open.
+        if (createHooked &&
+            !(HookSyscallStub("NtQueryAttributesFile", reinterpret_cast<void*>(&HookNtQueryAttributesFile),
+                  reinterpret_cast<void**>(&g_origNtQueryAttributesFile)) &&
+              HookSyscallStub("NtQueryFullAttributesFile", reinterpret_cast<void*>(&HookNtQueryFullAttributesFile),
+                  reinterpret_cast<void**>(&g_origNtQueryFullAttributesFile))))
+        {
+            log::Warn(L"Attribute queries could not be hooked; the CLR may reject the redirected file.");
         }
         g_ntHooks = createHooked;
         return createHooked;
