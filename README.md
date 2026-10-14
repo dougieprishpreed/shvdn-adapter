@@ -113,7 +113,7 @@ On Linux, WSL or MSYS2 with the .NET 8 SDK and MinGW-w64 (`x86_64-w64-mingw32-g+
 ```
 ./build.sh          # -> build/ShvdnLegacyCompat.asi
 ./build.sh --test   # also runs the managed tests and builds the native test programs
-tests/native/run_wine_tests.sh   # hook harness + end-to-end runs under wine64 + wine-mono (or on Windows)
+tests/native/run_wine_tests.sh   # hook harness + end-to-end runs under wine64 (use a prefix with `winetricks dotnet48`)
 ```
 
 Layout:
@@ -146,6 +146,12 @@ shims, or injected types. Shims that can't be mapped are skipped and logged. The
 ## Status
 
 The plugin is verified outside the game: unit and IL tests on the real SHVDN binaries, plus end-to-end runs of
-the compiled ASI under Wine + wine-mono. In those runs, a script built against the old API binds all 25 of
-its API member references with the plugin, and 14 of them fail without it. It has not yet been run inside
-GTA5.exe on Windows. If something goes wrong there, the log is the first place to look.
+the compiled ASI under Wine with **the real .NET Framework 4.8 runtime** (installed with `winetricks dotnet48`)
+and with wine-mono. In those runs, an SHVDN-style script domain loads the API exactly the way SHVDN does. A
+script built against the old API then binds all 25 of its API member references with the plugin, and 14 of
+them fail without it.
+
+v1.0.0 failed in game with `FileLoadException ... (0x80131621)` for both API DLLs. .NET Framework checks a
+file's size and timestamps by path (`NtQueryFullAttributesFile`) before opening it, and those calls still
+described the original file. v1.0.1 redirects them too. The first 64 operations on the API paths are now
+logged as `[trace]` lines, with their NTSTATUS.

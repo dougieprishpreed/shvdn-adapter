@@ -20,7 +20,7 @@
 
 namespace
 {
-    constexpr const wchar_t* kVersion = L"1.0.0";
+    constexpr const wchar_t* kVersion = L"1.0.1";
 
     HMODULE g_module = nullptr;
 

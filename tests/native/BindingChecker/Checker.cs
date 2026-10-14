@@ -13,9 +13,13 @@ public static class Checker
 {
     public static int Run(string gameDir)
     {
+        // Same setup as SHVDN.ScriptDomain.Load.
+        string scripts = Path.Combine(gameDir, "scripts");
         var domain = AppDomain.CreateDomain("SHVDN_ScriptDomain_Test", null, new AppDomainSetup
         {
-            ApplicationBase = Path.Combine(gameDir, "scripts"),
+            ShadowCopyFiles = "true",
+            ShadowCopyDirectories = scripts,
+            ApplicationBase = scripts,
         });
         try
         {
