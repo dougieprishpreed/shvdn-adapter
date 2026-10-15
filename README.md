@@ -145,13 +145,10 @@ shims, or injected types. Shims that can't be mapped are skipped and logged. The
 
 ## Status
 
-The plugin is verified outside the game: unit and IL tests on the real SHVDN binaries, plus end-to-end runs of
+Tested working in-game.
+
+The plugin is also verified outside the game: unit and IL tests on the real SHVDN binaries, plus end-to-end runs of
 the compiled ASI under Wine with **the real .NET Framework 4.8 runtime** (installed with `winetricks dotnet48`)
 and with wine-mono. In those runs, an SHVDN-style script domain loads the API exactly the way SHVDN does. A
 script built against the old API then binds all 25 of its API member references with the plugin, and 14 of
 them fail without it.
-
-v1.0.0 failed in game with `FileLoadException ... (0x80131621)` for both API DLLs. .NET Framework checks a
-file's size and timestamps by path (`NtQueryFullAttributesFile`) before opening it, and those calls still
-described the original file. v1.0.1 redirects them too. The first 64 operations on the API paths are now
-logged as `[trace]` lines, with their NTSTATUS.
